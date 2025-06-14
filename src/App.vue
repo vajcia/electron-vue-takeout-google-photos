@@ -58,7 +58,7 @@
                 <h4 v-if="!finished">Nájdené páry</h4>
                 <h4 v-else>Výsledky úpravy dátumov</h4>
                 <div
-                    v-if="pairs.length === jsonFiles.length && pairs.length === files.length && !finished"
+                    v-if="pairs.length === jsonFiles.length && pairs.length === files.length && !loadingSetDates && !finished"
                     class="alert alert-primary"
                     role="alert"
                 >

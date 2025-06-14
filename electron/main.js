@@ -4,8 +4,6 @@ const fs = require("fs-extra");
 const { execFile } = require("child_process");
 const { exiftool } = require("exiftool-vendored");
 
-const isDev = true; // process.env.NODE_ENV === "development";
-
 function createWindow() {
     const win = new BrowserWindow({
         width: 1000,
@@ -17,13 +15,10 @@ function createWindow() {
         },
     });
 
-    if (isDev) {
-        win.loadURL("http://localhost:5173");
-    } else {
-        win.loadFile(path.join(__dirname, "../src/index.html"));
-    }
-    
-    win.maximize(); 
+    win.loadURL("http://localhost:5173"); // DEVELOPMENT
+    // win.loadFile(path.join(__dirname, "../dist/index.html")); // PRODUCTION
+
+    win.maximize();
 }
 
 app.whenReady().then(createWindow);
