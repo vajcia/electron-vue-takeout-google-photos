@@ -18,6 +18,7 @@
         "vue": "^3.3.0"
     },
     "dependencies": {
+        "bootstrap": "^5.3.6",
         "exiftool-vendored": "^30.2.0",
         "fs-extra": "^11.1.1"
     },

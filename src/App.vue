@@ -1,47 +1,83 @@
 <template>
-    <div style="padding: 20px">
-        <button v-if="showResetBtn" @click="reset">Reset</button>
-        <button v-if="showOpenFolderBtn" @click="openFolder">Otvoriť priečinok</button>
-        <button v-if="showFindPairsBtn" @click="findPairs">Nájsť páry</button>
-        <button v-if="showSetDatesBtn" @click="setDates">Nastaviť dátumy</button>
+    <div class="container my-4">
+        <button v-if="showResetBtn" class="btn btn-danger mx-2" @click="reset">Reset</button>
+        <button v-if="showOpenFolderBtn" class="btn btn-primary mx-2" @click="openFolder">Otvoriť priečinok</button>
+        <button v-if="showFindPairsBtn" class="btn btn-primary mx-2" @click="findPairs">Nájsť páry</button>
+        <button v-if="showSetDatesBtn" class="btn btn-primary mx-2" @click="setDates">Spustiť úpravu dátumov</button>
+
+        <hr />
+
+        <div v-if="showOpenFolderBtn" class="alert alert-primary" role="alert">
+            Prosím, vyberte priečinok, ktorý obsahuje vaše súbory a JSON súbory.
+        </div>
 
         <div v-if="folder">
             <h3>Priečinok: {{ folder }}</h3>
-            <p v-if="loadingAllFiles">Načítavanie súborov...</p>
-            <div v-else-if="showFindPairsBtn">
-                <h4>Načítané JSON súbory ({{ jsonFiles.length }})</h4>
-                <ul>
-                    <li v-for="f in jsonFiles" :key="f">
-                        <b @click="f.showContent = !f.showContent">
-                            {{ f.name }}
-                        </b>
-                        <pre v-if="f.showContent">
+            <hr />
+
+            <div v-if="loadingAllFiles" class="d-flex align-items-center mb-4">
+                <strong role="status">Načítavanie súborov z priečinka...</strong>
+                <div class="spinner-border text-primary ms-auto" aria-hidden="true"></div>
+            </div>
+            <div v-else-if="showFindPairsBtn" class="row">
+                <div class="col-md-6">
+                    <h4>Načítané JSON súbory ({{ jsonFiles.length }})</h4>
+                    <ul>
+                        <li v-for="f in jsonFiles" :key="f">
+                            <b @click="f.showContent = !f.showContent">
+                                {{ f.name }}
+                            </b>
+                            <pre v-if="f.showContent">
                         {{ f.content }}
                     </pre
-                        >
-                    </li>
-                </ul>
-
-                <h4>Načítané obrázky a videá ({{ files.length }})</h4>
-                <ul>
-                    <li v-for="f in files" :key="f">
-                        <b @click="f.showExif = !f.showExif">
-                            {{ f.name }}
-                        </b>
-                        <pre v-if="f.showExif">
+                            >
+                        </li>
+                    </ul>
+                </div>
+                <div class="col-md-6">
+                    <h4>Načítané obrázky a videá ({{ files.length }})</h4>
+                    <ul>
+                        <li v-for="f in files" :key="f">
+                            <b @click="f.showExif = !f.showExif">
+                                {{ f.name }}
+                            </b>
+                            <pre v-if="f.showExif">
                         {{ f.exif }}
                     </pre
-                        >
-                    </li>
-                </ul>
+                            >
+                        </li>
+                    </ul>
+                </div>
             </div>
 
-            <div v-if="showSetDatesBtn">
-                <h4>Nájdené páry</h4>
+            <div v-if="loadingSetDates" class="d-flex align-items-center mb-4">
+                <strong role="status">Nastavovanie dátumov...</strong>
+                <div class="spinner-border text-primary ms-auto" aria-hidden="true"></div>
+            </div>
+            <div v-if="showSetDatesContent">
+                <h4 v-if="!finished">Nájdené páry</h4>
+                <h4 v-else>Výsledky úpravy dátumov</h4>
+                <div
+                    v-if="pairs.length === jsonFiles.length && pairs.length === files.length && !finished"
+                    class="alert alert-primary"
+                    role="alert"
+                >
+                    Všetky súbory a JSON súbory majú páry.
+                </div>
                 <ul>
                     <li v-for="f in pairs" :key="f">
-                        <b> {{ f.fromFilesArray.name }} -> {{ f.fromJsonArray.name }} </b>
-                        <p v-if="f.result !== undefined">{{ f.result ? "SUCCESS" : "ERROR" }}</p>
+                        <b :class="f.result === undefined ? '' : f.result ? 'text-success' : 'text-danger'">
+                            {{ f.fromFilesArray.name }} -> {{ f.fromJsonArray.name }}
+                        </b>
+                        <template v-if="loadingSetDates || finished">
+                            <p v-if="f.result !== undefined">
+                                {{ f.result ? "Dáta boli úspešne upravené." : "Nastala chyba pri úprave dát." }}
+                            </p>
+                            <div v-else class="d-flex align-items-center">
+                                <strong role="status">Prebieha úprava dátumov...</strong>
+                                <div class="spinner-border text-primary ms-auto" aria-hidden="true"></div>
+                            </div>
+                        </template>
                     </li>
                 </ul>
             </div>
@@ -60,12 +96,14 @@ export default {
             pairs: [],
             loadingAllFiles: false,
             loadingPairs: false,
+            loadingSetDates: false,
+            finished: false,
         };
     },
 
     computed: {
         showResetBtn() {
-            return !this.loadingAllFiles && !this.loadingPairs && this.folder !== "";
+            return !this.loadingAllFiles && !this.loadingPairs && !this.loadingSetDates && this.folder !== "";
         },
         showOpenFolderBtn() {
             return !this.loadingAllFiles && !this.loadingPairs && this.folder === "";
@@ -81,6 +119,11 @@ export default {
             );
         },
         showSetDatesBtn() {
+            return (
+                !this.loadingAllFiles && !this.loadingPairs && !this.loadingSetDates && !this.finished && this.pairs.length > 0
+            );
+        },
+        showSetDatesContent() {
             return !this.loadingAllFiles && !this.loadingPairs && this.pairs.length > 0;
         },
     },
@@ -94,6 +137,9 @@ export default {
             this.pairs = [];
             this.loadingAllFiles = false;
             this.loadingPairs = false;
+            this.loadingSetDates = false;
+            this.finished = false;
+            console.log("Aplikácia bola resetovaná.");
         },
 
         async openFolder() {
@@ -191,6 +237,8 @@ export default {
 
         async setDates() {
             console.log("Nastavenie dátumov pre páry:", this.pairs);
+            this.loadingSetDates = true;
+
             await window.electronAPI.createFolderForResults(this.folder);
             for (const pair of this.pairs) {
                 const jsonFile = pair.fromJsonArray;
@@ -209,6 +257,9 @@ export default {
                 const result = await window.electronAPI.setFileDates(this.folder, imageFile.fullPath, photoTakenTimeTimestamp);
                 pair.result = result;
             }
+
+            this.loadingSetDates = false;
+            this.finished = true;
         },
     },
 };
