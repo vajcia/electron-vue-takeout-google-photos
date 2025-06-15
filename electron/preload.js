@@ -6,6 +6,5 @@ contextBridge.exposeInMainWorld("electronAPI", {
     readJsonFile: (filePath) => ipcRenderer.invoke("read-json-file", filePath),
     getExifData: (filePath) => ipcRenderer.invoke("get-exif", filePath),
     createFolderForResults: (folderPath) => ipcRenderer.invoke("create-folder-for-results", folderPath),
-    setFileDates: (folderPath, filePath, photoTakenTime) =>
-        ipcRenderer.invoke("set-file-dates", folderPath, filePath, photoTakenTime),
+    setFileDates: (folderPath, filePath, json) => ipcRenderer.invoke("set-file-dates", folderPath, filePath, json),
 });

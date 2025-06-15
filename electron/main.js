@@ -94,7 +94,9 @@ ipcMain.handle("create-folder-for-results", (event, folderPath) => {
     if (!fs.existsSync(errorFolder)) fs.mkdirSync(errorFolder);
 });
 
-ipcMain.handle("set-file-dates", async (event, folderPath, filePath, photoTakenTime) => {
+ipcMain.handle("set-file-dates", async (event, folderPath, filePath, jsonStr) => {
+    const json = JSON.parse(jsonStr);
+
     const workingFolder = path.join(folderPath, "working");
     if (!fs.existsSync(workingFolder)) fs.mkdirSync(workingFolder);
     const workingPath = path.join(workingFolder, path.basename(filePath));
@@ -104,13 +106,13 @@ ipcMain.handle("set-file-dates", async (event, folderPath, filePath, photoTakenT
     const successPath = path.join(resultsFolder, path.basename(filePath));
 
     const errorFolder = path.join(folderPath, "error");
-    if (!fs.existsSync(errorFolder)) fs.mkdirSync(errorPath);
+    if (!fs.existsSync(errorFolder)) fs.mkdirSync(errorFolder);
     const errorPath = path.join(errorFolder, path.basename(filePath));
 
     try {
         await fs.copy(filePath, workingPath);
 
-        const numericPhotoTakenTime = Number(photoTakenTime);
+        const numericPhotoTakenTime = Number(json.photoTakenTime.timestamp);
         if (isNaN(numericPhotoTakenTime) || numericPhotoTakenTime === 0) {
             throw new Error("photoTakenTime is null, undefined, or invalid number.");
         }
@@ -119,12 +121,21 @@ ipcMain.handle("set-file-dates", async (event, folderPath, filePath, photoTakenT
         const formattedDate = formatExifDate(numericPhotoTakenTime);
 
         console.log("Formatted Date for EXIF/XMP:", formattedDate);
-        console.log("ExifTool Version (from vendored):", await exiftool.version());
 
-        const before = await exiftool.read(workingPath);
-        console.log("Before write EXIF/XMP:", before);
+        // const before = await exiftool.read(workingPath);
+        // console.log("Before write EXIF/XMP:", before);
 
-        const tagsToWrite = {
+        if (!json.geoData || (json.geoData?.latitude === 0.0 && json.geoData?.longitude === 0.0)) {
+            console.log("No valid geoData provided, clearing GPS tags.");
+            try {
+                await exiftool.write(filePath, { "GPS:all": "" }, ["-ignoreMinorErrors", "-overwrite_original"]);
+            } catch (gpsError) {
+                console.warn("Failed to clear GPS tags:", gpsError);
+                // TODO: pri upravovanych fotkach to zrejme neviem upravit :(
+            }
+        }
+
+        let tagsToWrite = {
             "EXIF:DateTimeOriginal": formattedDate,
             "EXIF:CreateDate": formattedDate,
             "EXIF:ModifyDate": formattedDate,
@@ -142,7 +153,7 @@ ipcMain.handle("set-file-dates", async (event, folderPath, filePath, photoTakenT
         await exiftool.write(workingPath, tagsToWrite);
 
         const metadata = await exiftool.read(workingPath);
-        console.log("Updated metadata (after write):", metadata);
+        // console.log("Updated metadata (after write):", metadata);
 
         const successfullyUpdated =
             (metadata.DateTimeOriginal && metadata.DateTimeOriginal.rawValue === formattedDate) ||
@@ -151,13 +162,11 @@ ipcMain.handle("set-file-dates", async (event, folderPath, filePath, photoTakenT
             (metadata.DateCreated && metadata.DateCreated === formattedDate.substring(0, 10).replace(/:/g, ":"));
 
         if (successfullyUpdated) {
-            console.log("At least one key date field (DateTimeOriginal, CreateDate, XMP:CreateDate) successfully updated.");
+            console.log("File dates successfully set to:", formattedDate);
             await fs.move(workingPath, successPath, { overwrite: true });
             return true;
         } else {
-            console.warn(
-                "No key date fields (DateTimeOriginal, CreateDate, XMP:CreateDate) were updated correctly or are displayed in metadata."
-            );
+            console.warn("File dates were not set correctly. Moving to error folder.");
             await fs.move(workingPath, errorPath, { overwrite: true });
             return false;
         }

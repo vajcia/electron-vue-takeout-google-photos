@@ -21,7 +21,7 @@
             </div>
             <div v-else-if="showFindPairsBtn" class="row">
                 <div class="col-md-6">
-                    <h4>Načítané JSON súbory ({{ jsonFiles.length }})</h4>
+                    <h4>Načítané JSON súbory</h4>
                     <ul>
                         <li v-for="f in jsonFiles" :key="f">
                             <b @click="f.showContent = !f.showContent">
@@ -35,7 +35,7 @@
                     </ul>
                 </div>
                 <div class="col-md-6">
-                    <h4>Načítané obrázky a videá ({{ files.length }})</h4>
+                    <h4>Načítané obrázky a videá</h4>
                     <ul>
                         <li v-for="f in files" :key="f">
                             <b @click="f.showExif = !f.showExif">
@@ -57,13 +57,29 @@
             <div v-if="showSetDatesContent">
                 <h4 v-if="!finished">Nájdené páry</h4>
                 <h4 v-else>Výsledky úpravy dátumov</h4>
-                <div
-                    v-if="pairs.length === jsonFiles.length && pairs.length === files.length && !loadingSetDates && !finished"
-                    class="alert alert-primary"
-                    role="alert"
-                >
-                    Všetky súbory a JSON súbory majú páry.
-                </div>
+                <template v-if="!loadingSetDates && !finished">
+                    <div
+                        v-if="pairs.length === jsonFiles.length && pairs.length === files.length"
+                        class="alert alert-primary"
+                        role="alert"
+                    >
+                        Všetky súbory a JSON súbory majú páry.
+                    </div>
+                    <div v-else class="alert alert-warning" role="alert">Nie všetky súbory a JSON súbory majú páry.</div>
+                </template>
+                <template v-if="finished">
+                    <div v-if="errorResults.length" class="alert alert-primary" role="alert">
+                        Niektoré páry mali chyby pri spracovaní:
+                        <ul>
+                            <li v-for="error in errorResults" :key="error.fromFilesArray.name">
+                                {{ error.fromFilesArray.name }} -> {{ error.fromJsonArray.name }}
+                            </li>
+                        </ul>
+                    </div>
+                    <div v-else-if="successResults.length === pairs.length" class="alert alert-success" role="alert">
+                        Všetky páry boli úspešne spracované.
+                    </div>
+                </template>
                 <ul>
                     <li v-for="f in pairs" :key="f">
                         <b :class="f.result === undefined ? '' : f.result ? 'text-success' : 'text-danger'">
@@ -74,7 +90,7 @@
                                 {{ f.result ? "Dáta boli úspešne upravené." : "Nastala chyba pri úprave dát." }}
                             </p>
                             <div v-else class="d-flex align-items-center">
-                                <strong role="status">Prebieha úprava dátumov...</strong>
+                                <span role="status">Prebieha úprava dátumov...</span>
                                 <div class="spinner-border text-primary ms-auto" aria-hidden="true"></div>
                             </div>
                         </template>
@@ -120,11 +136,23 @@ export default {
         },
         showSetDatesBtn() {
             return (
-                !this.loadingAllFiles && !this.loadingPairs && !this.loadingSetDates && !this.finished && this.pairs.length > 0
+                !this.loadingAllFiles &&
+                !this.loadingPairs &&
+                !this.loadingSetDates &&
+                !this.finished &&
+                this.pairs.length > 0 &&
+                this.pairs.length === this.jsonFiles.length &&
+                this.pairs.length === this.files.length
             );
         },
         showSetDatesContent() {
             return !this.loadingAllFiles && !this.loadingPairs && this.pairs.length > 0;
+        },
+        errorResults() {
+            return this.pairs.filter((pair) => pair.result === false);
+        },
+        successResults() {
+            return this.pairs.filter((pair) => pair.result === true);
         },
     },
 
@@ -149,10 +177,12 @@ export default {
             this.loadingAllFiles = true;
 
             this.folder = folder;
+            console.log("Načítavam súbory z priečinka:", this.folder);
             this.allFiles = await window.electronAPI.getFiles(folder);
             console.log("Načítané súbory:", this.allFiles);
 
             // get json files without "metadáta.json"
+            console.log("Načítavam JSON súbory...");
             this.jsonFiles = this.allFiles.filter((f) => f.name.endsWith(".json") && f.name !== "metadáta.json");
             for (const f of this.jsonFiles) {
                 await window.electronAPI
@@ -165,8 +195,10 @@ export default {
                     })
                     .catch((err) => console.error(err));
             }
+            console.log("Načítané JSON súbory:", this.jsonFiles);
 
             // get images, videos
+            console.log("Načítavam obrázky a videá...");
             this.files = this.allFiles.filter(
                 (f) => !f.name.endsWith(".json") && f.name !== "working" && f.name !== "success" && f.name !== "error"
             );
@@ -180,6 +212,7 @@ export default {
                     })
                     .catch((err) => console.error(err));
             }
+            console.log("Načítané obrázky a videá:", this.files);
 
             this.loadingAllFiles = false;
         },
@@ -249,12 +282,11 @@ export default {
                     pair.result = false;
                     continue;
                 }
+                console.log(
+                    `Nastavujem dátumy pre súbor ${imageFile.name} z JSON súboru ${jsonFile.name} s timestamp: ${jsonFile.content.photoTakenTime.timestamp}`
+                );
 
-                const photoTakenTimeTimestamp = jsonFile.content.photoTakenTime.timestamp;
-                const photoTakenTimeFormatted = jsonFile.content.photoTakenTime.formatted;
-                console.log(`Nastavujem dátum pre ${imageFile.name} na ${photoTakenTimeFormatted} (${photoTakenTimeTimestamp})`);
-
-                const result = await window.electronAPI.setFileDates(this.folder, imageFile.fullPath, photoTakenTimeTimestamp);
+                const result = await window.electronAPI.setFileDates(this.folder, imageFile.fullPath, JSON.stringify(jsonFile.content));
                 pair.result = result;
             }
 

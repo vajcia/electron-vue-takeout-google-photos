@@ -1,5 +1,5 @@
 # electron-vue-takeout-google-photos
-### Node.js 18.x (LTS)
+### Node.js 20.x (LTS)
 
 ## Lokálne spustenie:
 #### Vue aplikácia
