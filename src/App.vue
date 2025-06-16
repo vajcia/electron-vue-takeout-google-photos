@@ -1,84 +1,3 @@
-<template>
-    <div class="container my-4">
-        <!-- Loading -->
-        <div v-if="loadingAllFiles || loadingPairs || loadingSetDates" class="d-flex align-items-center mb-4">
-            <strong v-if="loadingAllFiles" role="status">
-                Prebieha načítavanie a získavanie EXIF metadát a JSON súborov...
-            </strong>
-            <strong v-if="loadingPairs" role="status"> Prebieha párovanie (JSON s metadátami + fotka/video)... </strong>
-            <strong v-if="loadingSetDates" role="status"> Prebieha úprava fotiek/videí podľa JSON metadát... </strong>
-            <div class="spinner-border text-primary ms-auto" aria-hidden="true"></div>
-        </div>
-
-        <!-- Alerts -->
-        <template v-if="folder && !loadingAllFiles && !loadingPairs && !loadingSetDates && !finished">
-            <div
-                v-if="pairs.length === jsonFiles.length && pairs.length === files.length"
-                class="alert alert-success d-flex align-items-center justify-content-between"
-                role="alert"
-            >
-                <p class="mb-0">
-                    <strong>Všetky JSON súbory s metadátami boli úspešne priradené k fotkám/videám.</strong><br />
-                    Skontrolujte si výsledok párovania a potom môžete pokračovať k úprave dátumov.
-                </p>
-                <button class="btn btn-success ml-auto mx-2" @click="setDates">Spustiť úpravu dátumov</button>
-            </div>
-            <div v-else class="alert alert-error" role="alert">
-                <strong>Nepodarilo sa spárovať všetky JSON súbory s fotkami/videami.</strong>
-            </div>
-        </template>
-        <template v-if="finished">
-            <div v-if="errorResults.length" class="alert alert-primary" role="alert">
-                <strong>Niektoré fotky/videá sa nepodarilo spracovať:</strong>
-                <ul>
-                    <li v-for="error in errorResults" :key="error.fromFilesArray.name">
-                        {{ error.fromFilesArray.name }} » {{ error.fromJsonArray.name }}
-                    </li>
-                </ul>
-            </div>
-            <div
-                v-else-if="successResults.length === pairs.length"
-                class="alert alert-success d-flex align-items-center justify-content-between"
-                role="alert"
-            >
-                <p class="mb-0"><strong>Všetky fotky/videá boli úspešne spracované.</strong></p>
-                <button class="btn btn-success mx-2" @click="reset">Späť na výber priečinka</button>
-            </div>
-        </template>
-
-        <!-- Buttons -->
-        <div class="mb-4">
-            <button v-if="showOpenFolderBtn" class="btn btn-primary mx-2" @click="openFolder">
-                Začať výberom priečinka s fotkami/videami a JSON súbormi s metadátami
-            </button>
-        </div>
-
-        <div v-if="folder">
-            <h3>Priečinok: {{ folder }}</h3>
-            <hr />
-
-            <div v-if="showSetDatesContent">
-                <ul>
-                    <li v-for="f in pairs" :key="f">
-                        <strong :class="f.result === undefined ? '' : f.result ? 'text-success' : 'text-danger'">
-                            {{ f.fromFilesArray.name }} » {{ f.fromJsonArray.name }}
-                        </strong>
-                        <template v-if="loadingSetDates || finished">
-                            <p v-if="f.result !== undefined">
-                                {{ f.result ? "Dáta boli úspešne upravené." : "Nastala chyba pri úprave dát." }}
-                            </p>
-                            <div v-else class="d-flex align-items-center">
-                                <span role="status">Prebieha úprava dátumov...</span>
-                                <div class="spinner-border text-primary ms-auto" aria-hidden="true"></div>
-                            </div>
-                        </template>
-                    </li>
-                </ul>
-            </div>
-        </div>
-    </div>
-</template>
-
 <script>
 export default {
     data() {
@@ -88,9 +7,11 @@ export default {
             jsonFiles: [],
             files: [],
             pairs: [],
+            filteredPairs: [],
             loadingAllFiles: false,
             loadingPairs: false,
             loadingSetDates: false,
+            updatingFileIndex: 1,
             finished: false,
         };
     },
@@ -117,9 +38,11 @@ export default {
             this.jsonFiles = [];
             this.files = [];
             this.pairs = [];
+            this.filteredPairs = [];
             this.loadingAllFiles = false;
             this.loadingPairs = false;
             this.loadingSetDates = false;
+            this.updatingFileIndex = 1;
             this.finished = false;
             console.log("Aplikácia bola resetovaná.");
         },
@@ -178,6 +101,7 @@ export default {
         findPairs() {
             this.loadingPairs = true;
             this.pairs = [];
+            this.filteredPairs = [];
 
             // Množina už spárovaných JSON názvov (obj1.name)
             const usedJsonTitles = new Set();
@@ -324,6 +248,8 @@ export default {
                 if (!foundMatchForJson) {
                     console.warn(`WARNING: JSON "${title1}" could not be paired.`);
                 }
+
+                this.filteredPairs = [...this.pairs];
             }
 
             // --- Výpisy výsledkov ---
@@ -361,6 +287,8 @@ export default {
 
             await window.electronAPI.createFolderForResults(this.folder);
             for (const pair of this.pairs) {
+                this.updatingFileIndex++;
+
                 const jsonFile = pair.fromJsonArray;
                 const imageFile = pair.fromFilesArray;
 
@@ -384,6 +312,128 @@ export default {
             this.loadingSetDates = false;
             this.finished = true;
         },
+
+        searchInPairs(event) {
+            const searchValue = event.target.value;
+            // console.log("searchPairs()", searchValue);
+            this.filteredPairs = this.pairs.filter(pair => {
+                return pair.fromJsonArray.name.includes(searchValue) || pair.fromFilesArray.name.includes(searchValue);
+            });
+        },
     },
 };
 </script>
+
+<template>
+    <div class="container my-4">
+        <!-- Loading -->
+        <div v-if="loadingAllFiles || loadingPairs || loadingSetDates" class="d-flex align-items-center mb-4">
+            <strong v-if="loadingAllFiles" role="status">
+                Prebieha načítavanie a získavanie EXIF metadát a JSON súborov...
+            </strong>
+            <strong v-if="loadingPairs" role="status"> Prebieha párovanie (JSON s metadátami + fotka/video)... </strong>
+            <strong v-if="loadingSetDates" role="status">
+                Prebieha úprava fotiek/videí podľa JSON metadát ({{ updatingFileIndex }} z {{ pairs.length }})...
+            </strong>
+            <div class="spinner-border text-primary ms-auto" aria-hidden="true"></div>
+        </div>
+
+        <!-- Alerts -->
+        <template v-if="folder && !loadingAllFiles && !loadingPairs && !loadingSetDates && !finished">
+            <div
+                v-if="pairs.length === jsonFiles.length && pairs.length === files.length"
+                class="alert alert-success d-flex align-items-center justify-content-between"
+                role="alert"
+            >
+                <p class="mb-0">
+                    <strong>Všetky JSON súbory s metadátami boli úspešne priradené k fotkám/videám.</strong><br />
+                    Skontrolujte si výsledok párovania a potom môžete pokračovať k úprave dátumov.
+                </p>
+                <button class="btn btn-success ml-auto mx-2" @click="setDates">Spustiť úpravu dátumov</button>
+            </div>
+            <div v-else class="alert alert-error" role="alert">
+                <strong>Nepodarilo sa spárovať všetky JSON súbory s fotkami/videami.</strong>
+            </div>
+        </template>
+        <template v-if="finished">
+            <div v-if="errorResults.length" class="alert alert-primary" role="alert">
+                <strong>Niektoré fotky/videá sa nepodarilo spracovať:</strong>
+                <ul>
+                    <li v-for="error in errorResults" :key="error.fromFilesArray.name">
+                        {{ error.fromFilesArray.name }} » {{ error.fromJsonArray.name }}
+                    </li>
+                </ul>
+            </div>
+            <div
+                v-else-if="successResults.length === pairs.length"
+                class="alert alert-success d-flex align-items-center justify-content-between"
+                role="alert"
+            >
+                <p class="mb-0"><strong>Všetky fotky/videá boli úspešne spracované.</strong></p>
+                <button class="btn btn-success mx-2" @click="reset">Späť na výber priečinka</button>
+            </div>
+        </template>
+
+        <!-- Buttons -->
+        <div class="mb-4">
+            <button v-if="showOpenFolderBtn" class="btn btn-primary mx-2" @click="openFolder">
+                Začať výberom priečinka s fotkami/videami a JSON súbormi s metadátami
+            </button>
+        </div>
+
+        <div v-if="folder">
+            <h3>Priečinok: {{ folder }}</h3>
+            <hr />
+
+            <template v-if="showSetDatesContent">
+                <input
+                    type="text"
+                    class="form-control mb-3"
+                    placeholder="Vyhľadávanie"
+                    aria-label="Vyhľadávanie"
+                    @input="searchInPairs"
+                />
+
+                <div class="table-wrapper">
+                    <table class="table table-striped">
+                        <thead>
+                            <tr>
+                                <th scope="col">Stav</th>
+                                <th scope="col">Json s metadátami</th>
+                                <th scope="col">Fotka/video</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr v-for="f in filteredPairs" :key="f">
+                                <th scope="row">
+                                    <small v-if="!loadingSetDates && f.result === undefined"> - </small>
+                                    <small v-else-if="loadingSetDates && f.result === undefined" class="text-primary">
+                                        Updating...
+                                    </small>
+                                    <small v-else :class="f.result ? 'text-success' : 'text-danger'">
+                                        {{ f.result ? "Success" : "Error" }}
+                                    </small>
+                                </th>
+                                <td>{{ f.fromJsonArray.name }}</td>
+                                <td>{{ f.fromFilesArray.name }}</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </template>
+        </div>
+    </div>
+</template>
+
+<style scoped lang="scss">
+.table-wrapper {
+    overflow-y: auto;
+    height: 70vh;
+
+    thead th {
+        background-color: #ccc;
+        position: sticky;
+        top: 0;
+    }
+}
+</style>
