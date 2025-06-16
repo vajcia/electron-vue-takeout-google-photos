@@ -1,9 +1,10 @@
 const { app, BrowserWindow, ipcMain, dialog } = require("electron");
 const path = require("path");
 const fs = require("fs-extra");
-const { execFile } = require("child_process");
-const { exiftool } = require("exiftool-vendored");
 const log = require("electron-log");
+const { ExifTool } = require("exiftool-vendored");
+
+const exiftool = new ExifTool({ taskTimeoutMillis: 60000 });
 
 function createWindow() {
     const win = new BrowserWindow({
@@ -74,14 +75,6 @@ ipcMain.handle("get-exif", async (event, filePath) => {
         log.error("Error reading EXIF:", e);
         return null;
     }
-});
-
-ipcMain.handle("run-exiftool", (event, filePath, dateTime) => {
-    return new Promise((resolve, reject) => {
-        execFile("exiftool", [`-overwrite_original`, `-DateTimeOriginal=${dateTime}`, filePath], (err) => {
-            err ? reject(err) : resolve(true);
-        });
-    });
 });
 
 ipcMain.handle("create-folder-for-results", (event, folderPath) => {

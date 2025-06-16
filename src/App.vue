@@ -13,7 +13,7 @@ export default {
             loadingAllFiles: false,
             loadingPairs: false,
             loadingSetDates: false,
-            updatingFileIndex: 1,
+            updatingFileIndex: 0,
             finished: false,
         };
     },
@@ -46,7 +46,7 @@ export default {
             this.loadingAllFiles = false;
             this.loadingPairs = false;
             this.loadingSetDates = false;
-            this.updatingFileIndex = 1;
+            this.updatingFileIndex = 0;
             this.finished = false;
             console.log("Aplikácia bola resetovaná.");
         },
