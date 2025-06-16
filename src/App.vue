@@ -8,6 +8,8 @@ export default {
             files: [],
             pairs: [],
             filteredPairs: [],
+            unpairedJsonFiles: [],
+            unpairedFiles: [],
             loadingAllFiles: false,
             loadingPairs: false,
             loadingSetDates: false,
@@ -39,6 +41,8 @@ export default {
             this.files = [];
             this.pairs = [];
             this.filteredPairs = [];
+            this.unpairedJsonFiles = [];
+            this.unpairedFiles = [];
             this.loadingAllFiles = false;
             this.loadingPairs = false;
             this.loadingSetDates = false;
@@ -54,29 +58,24 @@ export default {
             this.loadingAllFiles = true;
             this.folder = folder;
 
-            // Načítanie všetkých súborov z priečinka
             this.allFiles = await window.electronAPI.getFiles(folder);
 
-            // --- Paralelné spracovanie JSON súborov ---
+            // json files
             this.jsonFiles = this.allFiles.filter((f) => f.name.endsWith(".json") && f.name !== "metadáta.json");
 
             const jsonPromises = this.jsonFiles.map(async (f) => {
                 try {
                     const data = await window.electronAPI.readJsonFile(f.fullPath);
                     f.content = data;
-                    // Používame f.content.title, ak existuje, inak f.name. Toto by malo byť spoľahlivejšie pre zobrazenie.
-                    f.fileName = this.truncateTo46(f.content?.title || f.name);
                 } catch (err) {
                     console.error(`Chyba pri čítaní JSON súboru ${f.name}:`, err);
-                    // Nastavte content na null alebo prázdny objekt, ak chcete spracovať chybné JSONy
                     f.content = null;
                 }
             });
 
-            // Počkáme, kým sa dokončia VŠETKY JSON operácie
             await Promise.all(jsonPromises);
 
-            // --- Paralelné spracovanie obrázkov a videí (EXIF dát) ---
+            // files -> images, videos
             this.files = this.allFiles.filter(
                 (f) => !f.name.endsWith(".json") && f.name !== "working" && f.name !== "success" && f.name !== "error"
             );
@@ -86,7 +85,6 @@ export default {
             this.findPairs();
         },
 
-        // Predpokladám, že túto funkciu máte definovanú
         truncateTo46(str) {
             if (!str) return "";
             return str.length > 46 ? str.substring(0, 43) + "..." : str;
@@ -94,7 +92,7 @@ export default {
 
         removeExtension(filename) {
             const lastDotIndex = filename.lastIndexOf(".");
-            if (lastDotIndex === -1) return filename; // ak nemá príponu, vrátime pôvodný string
+            if (lastDotIndex === -1) return filename;
             return filename.slice(0, lastDotIndex);
         },
 
@@ -103,61 +101,31 @@ export default {
             this.pairs = [];
             this.filteredPairs = [];
 
-            // Množina už spárovaných JSON názvov (obj1.name)
             const usedJsonTitles = new Set();
-            // Množina už spárovaných súborových názvov (obj2.name)
             const usedFileTitles = new Set();
 
-            // Pomocná funkcia na získanie "čistého" názvu pre párovanie
-            // Kľúčové: správne spracovanie (1) suffixu a .supplemental-metadata
-            // name: vstupný názov (napr. "DSC_0110.JPG.supplemental-metadata(1).json" alebo "DSC_0110(1).JPG")
-            // isJsonOrigin: či názov pochádza z JSON súboru (používame to na špecifické spracovanie .json prípon a .supplemental-metadata)
             const getNormalizedPairingKey = (name, isJsonOrigin = false) => {
                 if (!name) return "";
                 let cleaned = name.toLowerCase();
 
-                // 1. Odstráň '.json' príponu, ak je to JSON pôvod
+                if (isJsonOrigin) cleaned = cleaned.replace(/\.json$/, "");
 
-                if (isJsonOrigin) {
-                    cleaned = cleaned.replace(/\.json$/, "");
-                }
-
-                // 2. Odstráň '.supplemental-metadata'
-                // Ak názov pred odstránením .supplemental-metadata končil na (1),
-                // chceme to (1) zachovať pre finálny kľúč.
                 let hasParenOneBeforeSupplementalMetadata = false;
-                if (cleaned.includes(".supplemental-metadata") && cleaned.endsWith("(1)")) {
+                if (cleaned.includes(".supplemental-metadata") && cleaned.endsWith("(1)"))
                     hasParenOneBeforeSupplementalMetadata = true;
-                }
 
-                cleaned = cleaned.replace(/\.supplemental-metadata/, ""); // Vždy odstráň '.supplemental-metadata'
+                cleaned = cleaned.replace(/\.supplemental-metadata/, "");
 
-                // 3. Odstráň príponu média (napr. .jpg, .png atď.)
                 const mediaExtensionRegex = /\.(jpg|jpeg|png|gif|bmp|tiff|webp|mp4|mov|avi|webm|mkv|3gp|heic)$/;
                 cleaned = cleaned.replace(mediaExtensionRegex, "");
 
-                // 4. Uprav (1) suffix na základe pôvodného kontextu
-                if (hasParenOneBeforeSupplementalMetadata && !cleaned.endsWith("(1)")) {
-                    // Ak bol JSON s .supplemental-metadata(1), uistite sa, že finálny kľúč obsahuje (1)
-                    cleaned += "(1)";
-                } else {
-                    // Pre bežné súbory ako "DSC_0110(1)" alebo JSON tituly ako "DSC_0110(1)"
-                    // uistite sa, že (1) zostalo, ak tam bolo
-                    // (už ho nemáme odstraňovať a znova pridávať, len ho skontrolujeme)
-                    // Ak náhodou zmizlo kvôli regexu (čo by nemalo), tak by tu bola komplexnejšia logika.
-                    // Ale ak regexy sú správne, tak (1) by už malo byť súčasťou 'cleaned'.
-                }
+                if (hasParenOneBeforeSupplementalMetadata && !cleaned.endsWith("(1)")) cleaned += "(1)";
 
-                // Odstráňte akékoľvek koncové bodky, ktoré mohli zostať
                 cleaned = cleaned.replace(/\.$/, "");
 
                 return cleaned.trim();
             };
 
-            // Vytvorenie mapy súborov pre rýchle vyhľadávanie
-            // Kľúč: getNormalizedPairingKey(file.name)
-            // Hodnota: Pole objektov súborov, ktoré majú rovnaký normalizovaný kľúč.
-            // Dôležité: Zoradíme ich pre deterministické správanie (napr. (1) súbory skôr ako bez (1))
             const filesByPairingKey = new Map();
             for (const file of this.files) {
                 const key = getNormalizedPairingKey(file.name);
@@ -168,7 +136,6 @@ export default {
                     filesByPairingKey.get(key).push(file);
                 }
             }
-            // Zoradenie súborov v mapách, aby (1) verzie mali prioritu, ak majú rovnaký kľúč
             filesByPairingKey.forEach((fileList) => {
                 fileList.sort((a, b) => {
                     const aBase = this.removeExtension(a.name);
@@ -179,59 +146,39 @@ export default {
                 });
             });
 
-            // Rýchle zoradenie JSON súborov
             this.jsonFiles.sort((a, b) => (a.name || "").localeCompare(b.name || ""));
 
             for (const obj1 of this.jsonFiles) {
-                const title1 = obj1.name; // Používame obj1.name ako hlavný identifikátor pre JSON
+                const title1 = obj1.name;
                 if (!title1 || usedJsonTitles.has(title1)) continue;
 
                 let foundMatchForJson = false;
 
-                // Získanie normalizovaného kľúča pre JSON súbor
                 const jsonPairingKey = getNormalizedPairingKey(title1, true);
 
-                // --- Fáza 1: Preferencia presnej zhody podľa normalizovaného kľúča ---
-                // Vyhľadávame súbory, ktoré majú rovnaký normalizovaný kľúč ako JSON
                 const potentialFiles = filesByPairingKey.get(jsonPairingKey) || [];
 
                 for (const obj2 of potentialFiles) {
                     const title2 = obj2.name;
-                    if (usedFileTitles.has(title2)) {
-                        // Kontrola, či súbor už nie je spárovaný
-                        continue;
-                    }
-
-                    // Kľúč by mal byť presne zhodný, ak funkcia getNormalizedPairingKey funguje správne
-                    // Tu môžeme ešte pridať dodatočné kontroly, ak by bolo potrebné, ale ideálne je,
-                    // aby kľúč už zabezpečil presnú zhodu.
+                    if (usedFileTitles.has(title2)) continue;
 
                     this.pairs.push({ fromJsonArray: obj1, fromFilesArray: obj2 });
                     usedJsonTitles.add(title1);
                     usedFileTitles.add(title2);
                     foundMatchForJson = true;
-                    break; // JSON spárovaný, prejsť na ďalší JSON
+                    break;
                 }
 
-                // --- Fáza 2: Záložná "includes" logika (bez ohľadu na (1) suffix) ---
-                // Spustí sa len, ak Fáza 1 nenašla pár.
                 if (!foundMatchForJson) {
-                    // Pre túto fázu zjednodušíme kľúč odstránením aj (1) pre širšie porovnanie
                     const jsonCoreNameSimple = jsonPairingKey.replace(/\(\d+\)$/, "");
 
-                    // Iterujeme cez všetky súbory (okrem už spárovaných)
                     for (const obj2 of this.files) {
                         const title2 = obj2.name;
-                        if (usedFileTitles.has(title2)) {
-                            // Kontrola, či súbor už nie je spárovaný
-                            continue;
-                        }
+                        if (usedFileTitles.has(title2)) continue;
 
-                        const filePairingKey = getNormalizedPairingKey(title2); // Pre súbor nie je isJsonOrigin = true
+                        const filePairingKey = getNormalizedPairingKey(title2);
                         const fileCoreNameSimple = filePairingKey.replace(/\(\d+\)$/, "");
 
-                        // Pôvodná includes logika: baseTitle.includes(baseName) || baseName.includes(baseTitle)
-                        // Teraz na zjednodušených kľúčoch bez (1)
                         if (
                             jsonCoreNameSimple.length > 0 &&
                             fileCoreNameSimple.length > 0 &&
@@ -241,7 +188,7 @@ export default {
                             usedJsonTitles.add(title1);
                             usedFileTitles.add(title2);
                             foundMatchForJson = true;
-                            break; // JSON spárovaný, prejsť na ďalší JSON
+                            break;
                         }
                     }
                 }
@@ -252,37 +199,39 @@ export default {
                 this.filteredPairs = [...this.pairs];
             }
 
-            // --- Výpisy výsledkov ---
+            // results
             if (this.pairs.length === this.files.length && this.pairs.length === this.jsonFiles.length) {
-                console.log("Všetky súbory a JSON súbory majú páry.");
+                console.log("All JSON files successfully paired with images/videos.");
             } else if (this.pairs.length === 0) {
-                console.warn("Nenašli sa žiadne páry.");
+                console.warn("No pairs found.");
             } else {
-                const pairedJsonFullTitles = new Set(this.pairs.map((p) => p.fromJsonArray.name)); // Používame .name, nie .content.title
+                const pairedJsonFullTitles = new Set(this.pairs.map((p) => p.fromJsonArray.name));
                 const unpairedJsonFiles = this.jsonFiles.filter((json) => !pairedJsonFullTitles.has(json.name));
 
-                const pairedFileFullPathsList = new Set(this.pairs.map((p) => p.fromFilesArray.name)); // Používame .name
+                const pairedFileFullPathsList = new Set(this.pairs.map((p) => p.fromFilesArray.name));
                 const unpairedFiles = this.files.filter((file) => !pairedFileFullPathsList.has(file.name));
 
-                console.warn("Niektoré súbory alebo JSON súbory nemajú páry.");
+                console.warn("Some JSON files were not paired with any images/videos.");
                 if (unpairedJsonFiles.length > 0) {
                     console.warn(
-                        "Nepárové JSON súbory:",
+                        "Unpaired JSON files:",
                         unpairedJsonFiles.map((j) => j.name)
                     );
                 }
                 if (unpairedFiles.length > 0) {
                     console.warn(
-                        "Nepárové súbory:",
+                        "Unpaired files:",
                         unpairedFiles.map((f) => f.name)
                     );
                 }
+
+                this.unpairedJsonFiles = unpairedJsonFiles;
+                this.unpairedFiles = unpairedFiles;
             }
             this.loadingPairs = false;
         },
 
         async setDates() {
-            console.log("Nastavenie dátumov pre páry:", this.pairs);
             this.loadingSetDates = true;
 
             await window.electronAPI.createFolderForResults(this.folder);
@@ -293,12 +242,12 @@ export default {
                 const imageFile = pair.fromFilesArray;
 
                 if (!jsonFile.content?.photoTakenTime?.timestamp || !jsonFile.content?.photoTakenTime?.formatted) {
-                    console.warn(`JSON súbor ${jsonFile.name} neobsahuje platný timestamp.`);
+                    console.warn(`JSON file ${jsonFile.name} does not contain valid photoTakenTime data.`);
                     pair.result = false;
                     continue;
                 }
                 console.log(
-                    `Nastavujem dátumy pre súbor ${imageFile.name} z JSON súboru ${jsonFile.name} s timestamp: ${jsonFile.content.photoTakenTime.timestamp}`
+                    `Setting dates for file ${imageFile.name} from JSON file ${jsonFile.name} with timestamp: ${jsonFile.content.photoTakenTime.timestamp}`
                 );
 
                 const result = await window.electronAPI.setFileDates(
@@ -316,7 +265,7 @@ export default {
         searchInPairs(event) {
             const searchValue = event.target.value;
             // console.log("searchPairs()", searchValue);
-            this.filteredPairs = this.pairs.filter(pair => {
+            this.filteredPairs = this.pairs.filter((pair) => {
                 return pair.fromJsonArray.name.includes(searchValue) || pair.fromFilesArray.name.includes(searchValue);
             });
         },
@@ -351,16 +300,32 @@ export default {
                 </p>
                 <button class="btn btn-success ml-auto mx-2" @click="setDates">Spustiť úpravu dátumov</button>
             </div>
-            <div v-else class="alert alert-error" role="alert">
-                <strong>Nepodarilo sa spárovať všetky JSON súbory s fotkami/videami.</strong>
+            <div v-else class="alert alert-danger" role="alert">
+                <p><strong>Nepodarilo sa spárovať všetky JSON súbory s fotkami/videami.</strong></p>
+                <template v-if="unpairedJsonFiles.length > 0">
+                    <h6>Nespárované JSON súbory:</h6>
+                    <ul>
+                        <li v-for="error in unpairedJsonFiles" :key="error.fullPath">
+                            {{ error.fullPath }}
+                        </li>
+                    </ul>
+                </template>
+                <template v-if="unpairedFiles.length > 0">
+                    <h6>Nespárované fotky/videá:</h6>
+                    <ul>
+                        <li v-for="error in unpairedFiles" :key="error.fullPath">
+                            {{ error.fullPath }}
+                        </li>
+                    </ul>
+                </template>
             </div>
         </template>
         <template v-if="finished">
-            <div v-if="errorResults.length" class="alert alert-primary" role="alert">
-                <strong>Niektoré fotky/videá sa nepodarilo spracovať:</strong>
+            <div v-if="errorResults.length" class="alert alert-warning" role="alert">
+                <p><strong>Niektoré fotky/videá sa nepodarilo spracovať:</strong></p>
                 <ul>
-                    <li v-for="error in errorResults" :key="error.fromFilesArray.name">
-                        {{ error.fromFilesArray.name }} » {{ error.fromJsonArray.name }}
+                    <li v-for="error in errorResults" :key="error.fromFilesArray.fullPath">
+                        {{ error.fromFilesArray.fullPath }}
                     </li>
                 </ul>
             </div>
@@ -395,12 +360,12 @@ export default {
                 />
 
                 <div class="table-wrapper">
-                    <table class="table table-striped">
+                    <table class="table">
                         <thead>
                             <tr>
-                                <th scope="col">Stav</th>
-                                <th scope="col">Json s metadátami</th>
-                                <th scope="col">Fotka/video</th>
+                                <th scope="col" class="bg-primary text-white">Stav</th>
+                                <th scope="col" class="bg-primary text-white">Json s metadátami</th>
+                                <th scope="col" class="bg-primary text-white">Fotka/video</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -431,7 +396,6 @@ export default {
     height: 70vh;
 
     thead th {
-        background-color: #ccc;
         position: sticky;
         top: 0;
     }

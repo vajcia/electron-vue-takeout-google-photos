@@ -3,6 +3,7 @@ const path = require("path");
 const fs = require("fs-extra");
 const { execFile } = require("child_process");
 const { exiftool } = require("exiftool-vendored");
+const log = require("electron-log");
 
 function createWindow() {
     const win = new BrowserWindow({
@@ -30,9 +31,9 @@ app.on("window-all-closed", () => {
 });
 
 app.on("before-quit", () => {
-    console.log("Electron app is about to quit. Ending ExifTool process...");
+    log.info("Electron app is about to quit. Ending ExifTool process...");
     exiftool.end();
-    console.log("ExifTool process terminated.");
+    log.info("ExifTool process terminated.");
 });
 
 ipcMain.handle("dialog:selectFolder", async () => {
@@ -47,7 +48,7 @@ ipcMain.handle("get-files", async (event, folder) => {
     files.forEach((file, index) => {
         newFiles.push({ name: file, fullPath: path.join(folder, file) });
     });
-    console.log(newFiles);
+    log.info(newFiles);
     return newFiles;
 });
 
@@ -60,7 +61,7 @@ ipcMain.handle("read-json-file", async (event, path) => {
         const data = await fs.readFile(path, "utf-8");
         return JSON.parse(data);
     } catch (e) {
-        console.error("Error reading JSON:", e);
+        log.error("Error reading JSON:", e);
         return null;
     }
 });
@@ -70,7 +71,7 @@ ipcMain.handle("get-exif", async (event, filePath) => {
         const tags = await exiftool.read(filePath);
         return tags;
     } catch (e) {
-        console.error("Error reading EXIF:", e);
+        log.error("Error reading EXIF:", e);
         return null;
     }
 });
@@ -117,23 +118,13 @@ ipcMain.handle("set-file-dates", async (event, folderPath, filePath, jsonStr) =>
             throw new Error("photoTakenTime is null, undefined, or invalid number.");
         }
 
-        console.log("\n----------\n");
+        log.info("\n----------\n");
         const formattedDate = formatExifDate(numericPhotoTakenTime);
 
-        console.log("Formatted Date for EXIF/XMP:", formattedDate);
+        log.info("Formatted Date for EXIF/XMP:", formattedDate);
 
         // const before = await exiftool.read(workingPath);
-        // console.log("Before write EXIF/XMP:", before);
-
-        if (!json.geoData || (json.geoData?.latitude === 0.0 && json.geoData?.longitude === 0.0)) {
-            console.log("No valid geoData provided, clearing GPS tags.");
-            try {
-                await exiftool.write(filePath, { "GPS:all": "" }, ["-ignoreMinorErrors", "-overwrite_original"]);
-            } catch (gpsError) {
-                console.warn("Failed to clear GPS tags:", gpsError);
-                // TODO: pri upravovanych fotkach to zrejme neviem upravit :(
-            }
-        }
+        // log.info("Before write EXIF/XMP:", before);
 
         let tagsToWrite = {
             "EXIF:DateTimeOriginal": formattedDate,
@@ -150,34 +141,51 @@ ipcMain.handle("set-file-dates", async (event, folderPath, filePath, jsonStr) =>
             "QuickTime:ModifyDate": formattedDate,
         };
 
-        await exiftool.write(workingPath, tagsToWrite);
+        try {
+            await exiftool.write(workingPath, tagsToWrite);
+        } catch (error) {
+            const errorMessage = error.message?.replace(/&#(\d+);/g, (_, code) => String.fromCharCode(code));
 
-        const metadata = await exiftool.read(workingPath);
-        // console.log("Updated metadata (after write):", metadata);
-
-        const successfullyUpdated =
-            (metadata.DateTimeOriginal && metadata.DateTimeOriginal.rawValue === formattedDate) ||
-            (metadata.CreateDate && metadata.CreateDate.rawValue === formattedDate) ||
-            (metadata["XMP-xmp:CreateDate"] && metadata["XMP-xmp:CreateDate"].rawValue === formattedDate) ||
-            (metadata.DateCreated && metadata.DateCreated === formattedDate.substring(0, 10).replace(/:/g, ":"));
-
-        if (successfullyUpdated) {
-            console.log("File dates successfully set to:", formattedDate);
-            await fs.move(workingPath, successPath, { overwrite: true });
-            return true;
-        } else {
-            console.warn("File dates were not set correctly. Moving to error folder.");
-            await fs.move(workingPath, errorPath, { overwrite: true });
-            return false;
+            if (errorMessage?.includes("Can't read GPS data")) {
+                log.warn("ExifTool write failed due to missing GPS data. Attempting to set dates without GPS tags.");
+                return await checkSuccesfulyUpdated(formattedDate, workingPath, successPath, errorPath);
+            } else {
+                log.error("ExifTool write failed with a critical error:", error);
+                await fs.move(workingPath, errorPath, { overwrite: true });
+                return false;
+            }
         }
+
+        return await checkSuccesfulyUpdated(formattedDate, workingPath, successPath, errorPath);
     } catch (error) {
-        console.error("Error setting file dates:", error);
+        log.error("Error setting file dates:", error);
         if (fs.existsSync(workingPath)) {
             await fs.move(workingPath, errorPath, { overwrite: true });
         }
         return false;
     }
 });
+
+async function checkSuccesfulyUpdated(formattedDate, workingPath, successPath, errorPath) {
+    const metadata = await exiftool.read(workingPath);
+    // log.info("Updated metadata (after write):", metadata);
+
+    const successfullyUpdated =
+        (metadata.DateTimeOriginal && metadata.DateTimeOriginal.rawValue === formattedDate) ||
+        (metadata.CreateDate && metadata.CreateDate.rawValue === formattedDate) ||
+        (metadata["XMP-xmp:CreateDate"] && metadata["XMP-xmp:CreateDate"].rawValue === formattedDate) ||
+        (metadata.DateCreated && metadata.DateCreated === formattedDate.substring(0, 10).replace(/:/g, ":"));
+
+    if (successfullyUpdated) {
+        log.info("File dates successfully set to:", formattedDate);
+        await fs.move(workingPath, successPath, { overwrite: true });
+        return true;
+    } else {
+        log.warn("File dates were not set correctly. Moving to error folder.");
+        await fs.move(workingPath, errorPath, { overwrite: true });
+        return false;
+    }
+}
 
 function formatExifDate(timestamp) {
     const date = new Date(Number(timestamp) * 1000);
