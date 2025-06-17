@@ -15,6 +15,8 @@ export default {
             loadingSetDates: false,
             updatingFileIndex: 0,
             finished: false,
+            searchInput: "",
+            searchSelect: "all",
         };
     },
 
@@ -48,6 +50,8 @@ export default {
             this.loadingSetDates = false;
             this.updatingFileIndex = 0;
             this.finished = false;
+            this.searchInput = "";
+            this.searchSelect = "all";
             console.log("Aplikácia bola resetovaná.");
         },
 
@@ -262,12 +266,29 @@ export default {
             this.finished = true;
         },
 
-        searchInPairs(event) {
-            const searchValue = event.target.value;
-            // console.log("searchPairs()", searchValue);
-            this.filteredPairs = this.pairs.filter((pair) => {
-                return pair.fromJsonArray.name.includes(searchValue) || pair.fromFilesArray.name.includes(searchValue);
-            });
+        searchInPairs() {
+            this.filteredPairs = this.pairs
+                .filter((pair) => {
+                    return (
+                        pair.fromJsonArray.name.includes(this.searchInput) || pair.fromFilesArray.name.includes(this.searchInput)
+                    );
+                })
+                .filter((pair) => {
+                    if (this.searchSelect === "waiting") return pair.result === undefined;
+                    else if (this.searchSelect === "ok") return pair.result === true;
+                    else if (this.searchSelect === "nok") return pair.result === false;
+                    else return true;
+                });
+        },
+    },
+
+    watch: {
+        pairs: {
+            handler() {
+                console.log("Pairs updated:", this.pairs);
+                this.searchInPairs();
+            },
+            deep: true,
         },
     },
 };
@@ -291,14 +312,14 @@ export default {
         <template v-if="folder && !loadingAllFiles && !loadingPairs && !loadingSetDates && !finished">
             <div
                 v-if="pairs.length === jsonFiles.length && pairs.length === files.length"
-                class="alert alert-success d-flex align-items-center justify-content-between"
+                class="alert alert-info d-flex align-items-center justify-content-between"
                 role="alert"
             >
                 <p class="mb-0">
                     <strong>Všetky JSON súbory s metadátami boli úspešne priradené k fotkám/videám.</strong><br />
                     Skontrolujte si výsledok párovania a potom môžete pokračovať k úprave dátumov.
                 </p>
-                <button class="btn btn-success ml-auto mx-2" @click="setDates">Spustiť úpravu dátumov</button>
+                <button class="btn btn-info ml-auto mx-2" @click="setDates">Spustiť úpravu dátumov</button>
             </div>
             <div v-else class="alert alert-danger" role="alert">
                 <p><strong>Nepodarilo sa spárovať všetky JSON súbory s fotkami/videami.</strong></p>
@@ -340,9 +361,25 @@ export default {
         </template>
 
         <!-- Buttons -->
-        <div class="mb-4">
+        <div class="my-4">
             <button v-if="showOpenFolderBtn" class="btn btn-primary mx-2" @click="openFolder">
                 Začať výberom priečinka s fotkami/videami a JSON súbormi s metadátami
+            </button>
+
+            <button
+                v-if="
+                    (finished && errorResults.length) ||
+                    (folder &&
+                        !loadingAllFiles &&
+                        !loadingPairs &&
+                        !loadingSetDates &&
+                        !finished &&
+                        (pairs.length != jsonFiles.length || pairs.length !== files.length))
+                "
+                class="btn btn-secondary mx-2"
+                @click="reset"
+            >
+                Späť na začiatok
             </button>
         </div>
 
@@ -351,13 +388,26 @@ export default {
             <hr />
 
             <template v-if="showSetDatesContent">
-                <input
-                    type="text"
-                    class="form-control mb-3"
-                    placeholder="Vyhľadávanie"
-                    aria-label="Vyhľadávanie"
-                    @input="searchInPairs"
-                />
+                <div class="row mb-3">
+                    <div class="col-md-6">
+                        <input
+                            v-model="searchInput"
+                            type="text"
+                            class="form-control"
+                            placeholder="Vyhľadávanie"
+                            aria-label="Vyhľadávanie"
+                            @input="searchInPairs"
+                        />
+                    </div>
+                    <div class="col-md-2">
+                        <select v-model="searchSelect" class="form-select" aria-label="Search options" @change="searchInPairs">
+                            <option value="all">Všetky</option>
+                            <option value="waiting">Čakajúce</option>
+                            <option value="ok">Úspešné</option>
+                            <option value="nok">Neúspešné</option>
+                        </select>
+                    </div>
+                </div>
 
                 <div class="table-wrapper">
                     <table class="table">
